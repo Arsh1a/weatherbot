@@ -746,6 +746,10 @@ def scan_and_update():
                             best_signal["spread"]       = real_spread
                             best_signal["shares"]       = round(best_signal["cost"] / real_ask, 2)
                             best_signal["ev"]           = round(calc_ev(best_signal["p"], real_ask), 4)
+                            # Polymarket minimum order = 5 shares; skip if we can't meet it
+                            if best_signal["shares"] < 5:
+                                print(f"  [SKIP] {loc['name']} {date} — only {best_signal['shares']} shares at ${real_ask:.3f} (min 5)")
+                                skip_position = True
                     except Exception as e:
                         print(f"  [WARN] Could not fetch real ask for {best_signal['market_id']}: {e}")
 
