@@ -45,9 +45,11 @@ KELLY_FRACTION   = _cfg.get("kelly_fraction", 0.25)
 MAX_SLIPPAGE     = _cfg.get("max_slippage", 0.03)  # max allowed ask-bid spread
 SCAN_INTERVAL    = _cfg.get("scan_interval", 3600)   # every hour
 CALIBRATION_MIN  = _cfg.get("calibration_min", 30)
-VC_KEY           = _cfg.get("vc_key", "")
-LIVE_TRADING     = _cfg.get("live_trading", False)
-DRY_RUN          = _cfg.get("dry_run", False)
+VC_KEY             = _cfg.get("vc_key", "")
+LIVE_TRADING       = _cfg.get("live_trading", False)
+DRY_RUN            = _cfg.get("dry_run", False)
+TELEGRAM_TOKEN     = _cfg.get("telegram_token", "")
+TELEGRAM_CHAT_ID   = _cfg.get("telegram_chat_id", "")
 
 SIGMA_F = 2.0
 SIGMA_C = 1.2
@@ -111,6 +113,18 @@ def log_live(action, city, date, detail, order_id=None, error=None):
     with open(LIVE_LOG, "a", encoding="utf-8") as f:
         f.write(line)
     print(f"  [LOG] {line.strip()}")
+
+def send_telegram(msg):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"},
+            timeout=5,
+        )
+    except Exception:
+        pass
 
 # =============================================================================
 # MATH
@@ -761,6 +775,7 @@ def scan_and_update():
                                     log_live("BUY", loc["name"], date,
                                              f"${best_signal['entry_price']:.3f} x {mkt['position']['shares']} shares = ${best_signal['cost']:.2f}",
                                              order_id=oid)
+                                    send_telegram(f"🟢 <b>BUY</b> {loc['name']} {date}\n${best_signal['entry_price']:.3f} × {mkt['position']['shares']} shares = ${best_signal['cost']:.2f}")
                                 except Exception as e:
                                     log_live("BUY_FAIL", loc["name"], date,
                                              f"${best_signal['entry_price']:.3f} x ${best_signal['cost']:.2f}", error=e)
@@ -814,7 +829,9 @@ def scan_and_update():
             state["losses"] += 1
 
         result = "WIN" if won else "LOSS"
+        emoji  = "🏆" if won else "❌"
         print(f"  [{result}] {mkt['city_name']} {mkt['date']} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
+        send_telegram(f"{emoji} <b>{result}</b> {mkt['city_name']} {mkt['date']}\nPnL: {'+'if pnl>=0 else ''}{pnl:.2f} | Balance: ${round(balance,2)}")
         resolved += 1
 
         save_market(mkt)
@@ -1031,9 +1048,11 @@ def monitor_positions():
                         oid = resp.get("orderID") if isinstance(resp, dict) else None
                         log_live(reason, city_name, mkt["date"],
                                  f"exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
+                        send_telegram(f"🔴 <b>{reason}</b> {city_name} {mkt['date']}\nExit ${current_price:.3f} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
                     except Exception as e:
                         log_live(f"{reason}_FAIL", city_name, mkt["date"],
                                  f"exit ${current_price:.3f}", error=e)
+                        send_telegram(f"⚠️ <b>{reason}_FAIL</b> {city_name} {mkt['date']}\n{e}")
             save_market(mkt)
 
     if closed:
