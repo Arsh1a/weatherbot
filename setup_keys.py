@@ -18,7 +18,7 @@ def main():
         return
     print("Connecting to Polymarket CLOB...")
     client = ClobClient(HOST, key=pk, chain_id=POLYGON)
-    creds = client.create_api_key(nonce=1)
+    creds = client.create_api_key(nonce=0)
     secrets = json.loads(secrets_path.read_text(encoding="utf-8"))
     secrets["clob_api_key"]        = creds.api_key
     secrets["clob_api_secret"]     = creds.api_secret
