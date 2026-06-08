@@ -754,8 +754,12 @@ def scan_and_update():
                                                      best_signal["entry_price"], best_signal["cost"])
                                     oid = resp.get("orderID") if isinstance(resp, dict) else None
                                     mkt["position"]["order_id"] = oid
+                                    # Use actual filled shares if available (avoid STOP_FAIL on partial fills)
+                                    filled = float(resp.get("sizeMatched", 0)) if isinstance(resp, dict) else 0
+                                    if filled > 0:
+                                        mkt["position"]["shares"] = round(filled, 6)
                                     log_live("BUY", loc["name"], date,
-                                             f"${best_signal['entry_price']:.3f} x {best_signal['shares']} shares = ${best_signal['cost']:.2f}",
+                                             f"${best_signal['entry_price']:.3f} x {mkt['position']['shares']} shares = ${best_signal['cost']:.2f}",
                                              order_id=oid)
                                 except Exception as e:
                                     log_live("BUY_FAIL", loc["name"], date,
