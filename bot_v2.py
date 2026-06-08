@@ -47,6 +47,7 @@ SCAN_INTERVAL    = _cfg.get("scan_interval", 3600)   # every hour
 CALIBRATION_MIN  = _cfg.get("calibration_min", 30)
 VC_KEY           = _cfg.get("vc_key", "")
 LIVE_TRADING     = _cfg.get("live_trading", False)
+DRY_RUN          = _cfg.get("dry_run", False)
 
 SIGMA_F = 2.0
 SIGMA_C = 1.2
@@ -601,14 +602,18 @@ def scan_and_update():
                         reason = "STOP" if current_price < entry else "TRAILING BE"
                         print(f"  [{reason}] {loc['name']} {date} | entry ${entry:.3f} exit ${current_price:.3f} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
                         if _trader and place_sell and pos.get("yes_token_id"):
-                            try:
-                                resp = place_sell(_trader, pos["yes_token_id"], current_price, pos["shares"])
-                                oid = resp.get("orderID") if isinstance(resp, dict) else None
-                                log_live(reason, loc["name"], date,
-                                         f"exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
-                            except Exception as e:
-                                log_live(f"{reason}_FAIL", loc["name"], date,
-                                         f"exit ${current_price:.3f}", error=e)
+                            if DRY_RUN:
+                                log_live(f"DRY_{reason}", loc["name"], date,
+                                         f"WOULD sell ${current_price:.3f} x {pos['shares']} shares pnl={'+'if pnl>=0 else ''}{pnl:.2f}")
+                            else:
+                                try:
+                                    resp = place_sell(_trader, pos["yes_token_id"], current_price, pos["shares"])
+                                    oid = resp.get("orderID") if isinstance(resp, dict) else None
+                                    log_live(reason, loc["name"], date,
+                                             f"exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
+                                except Exception as e:
+                                    log_live(f"{reason}_FAIL", loc["name"], date,
+                                             f"exit ${current_price:.3f}", error=e)
 
             # --- CLOSE POSITION if forecast shifted 2+ degrees ---
             if mkt.get("position") and forecast_temp is not None:
@@ -637,15 +642,19 @@ def scan_and_update():
                         closed += 1
                         print(f"  [CLOSE] {loc['name']} {date} — forecast changed | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
                         if _trader and place_sell and mkt["position"].get("yes_token_id"):
-                            try:
-                                resp = place_sell(_trader, mkt["position"]["yes_token_id"],
-                                                  current_price, mkt["position"]["shares"])
-                                oid = resp.get("orderID") if isinstance(resp, dict) else None
-                                log_live("CLOSE", loc["name"], date,
-                                         f"forecast changed exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
-                            except Exception as e:
-                                log_live("CLOSE_FAIL", loc["name"], date,
-                                         f"exit ${current_price:.3f}", error=e)
+                            if DRY_RUN:
+                                log_live("DRY_CLOSE", loc["name"], date,
+                                         f"WOULD sell ${current_price:.3f} x {mkt['position']['shares']} shares pnl={'+'if pnl>=0 else ''}{pnl:.2f}")
+                            else:
+                                try:
+                                    resp = place_sell(_trader, mkt["position"]["yes_token_id"],
+                                                      current_price, mkt["position"]["shares"])
+                                    oid = resp.get("orderID") if isinstance(resp, dict) else None
+                                    log_live("CLOSE", loc["name"], date,
+                                             f"forecast changed exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
+                                except Exception as e:
+                                    log_live("CLOSE_FAIL", loc["name"], date,
+                                             f"exit ${current_price:.3f}", error=e)
 
             # --- OPEN POSITION ---
             if not mkt.get("position") and forecast_temp is not None and hours >= MIN_HOURS:
@@ -735,17 +744,21 @@ def scan_and_update():
                               f"${best_signal['entry_price']:.3f} | EV {best_signal['ev']:+.2f} | "
                               f"${best_signal['cost']:.2f} ({best_signal['forecast_src'].upper()})")
                         if _trader and place_buy and best_signal.get("yes_token_id"):
-                            try:
-                                resp = place_buy(_trader, best_signal["yes_token_id"],
-                                                 best_signal["entry_price"], best_signal["cost"])
-                                oid = resp.get("orderID") if isinstance(resp, dict) else None
-                                mkt["position"]["order_id"] = oid
-                                log_live("BUY", loc["name"], date,
-                                         f"${best_signal['entry_price']:.3f} x {best_signal['shares']} shares = ${best_signal['cost']:.2f}",
-                                         order_id=oid)
-                            except Exception as e:
-                                log_live("BUY_FAIL", loc["name"], date,
-                                         f"${best_signal['entry_price']:.3f} x ${best_signal['cost']:.2f}", error=e)
+                            if DRY_RUN:
+                                log_live("DRY_BUY", loc["name"], date,
+                                         f"WOULD buy ${best_signal['entry_price']:.3f} x {best_signal['shares']} shares = ${best_signal['cost']:.2f} token={best_signal['yes_token_id'][:12]}...")
+                            else:
+                                try:
+                                    resp = place_buy(_trader, best_signal["yes_token_id"],
+                                                     best_signal["entry_price"], best_signal["cost"])
+                                    oid = resp.get("orderID") if isinstance(resp, dict) else None
+                                    mkt["position"]["order_id"] = oid
+                                    log_live("BUY", loc["name"], date,
+                                             f"${best_signal['entry_price']:.3f} x {best_signal['shares']} shares = ${best_signal['cost']:.2f}",
+                                             order_id=oid)
+                                except Exception as e:
+                                    log_live("BUY_FAIL", loc["name"], date,
+                                             f"${best_signal['entry_price']:.3f} x ${best_signal['cost']:.2f}", error=e)
 
             # Market closed by time
             if hours < 0.5 and mkt["status"] == "open":
@@ -1004,14 +1017,18 @@ def monitor_positions():
             closed += 1
             print(f"  [{reason}] {city_name} {mkt['date']} | entry ${entry:.3f} exit ${current_price:.3f} | {hours_left:.0f}h left | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
             if _trader and place_sell and pos.get("yes_token_id"):
-                try:
-                    resp = place_sell(_trader, pos["yes_token_id"], current_price, pos["shares"])
-                    oid = resp.get("orderID") if isinstance(resp, dict) else None
-                    log_live(reason, city_name, mkt["date"],
-                             f"exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
-                except Exception as e:
-                    log_live(f"{reason}_FAIL", city_name, mkt["date"],
-                             f"exit ${current_price:.3f}", error=e)
+                if DRY_RUN:
+                    log_live(f"DRY_{reason}", city_name, mkt["date"],
+                             f"WOULD sell ${current_price:.3f} x {pos['shares']} shares pnl={'+'if pnl>=0 else ''}{pnl:.2f}")
+                else:
+                    try:
+                        resp = place_sell(_trader, pos["yes_token_id"], current_price, pos["shares"])
+                        oid = resp.get("orderID") if isinstance(resp, dict) else None
+                        log_live(reason, city_name, mkt["date"],
+                                 f"exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
+                    except Exception as e:
+                        log_live(f"{reason}_FAIL", city_name, mkt["date"],
+                                 f"exit ${current_price:.3f}", error=e)
             save_market(mkt)
 
     if closed:

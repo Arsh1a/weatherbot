@@ -10,5 +10,6 @@
   "scan_interval": 3600,
   "calibration_min": 30,
   "max_slippage": 0.03,
-  "live_trading": false
+  "live_trading": false,
+  "dry_run": false
 }
