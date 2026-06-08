@@ -28,6 +28,12 @@ from pathlib import Path
 with open("config.json", encoding="utf-8") as f:
     _cfg = json.load(f)
 
+_secrets_path = Path("secrets.json")
+if _secrets_path.exists():
+    _cfg.update(json.loads(_secrets_path.read_text(encoding="utf-8")))
+else:
+    raise FileNotFoundError("secrets.json not found — copy secrets.example.json to secrets.json and fill in your keys")
+
 BALANCE          = _cfg.get("balance", 10000.0)
 MAX_BET          = _cfg.get("max_bet", 20.0)        # max bet per trade
 MIN_EV           = _cfg.get("min_ev", 0.10)
@@ -40,6 +46,7 @@ MAX_SLIPPAGE     = _cfg.get("max_slippage", 0.03)  # max allowed ask-bid spread
 SCAN_INTERVAL    = _cfg.get("scan_interval", 3600)   # every hour
 CALIBRATION_MIN  = _cfg.get("calibration_min", 30)
 VC_KEY           = _cfg.get("vc_key", "")
+LIVE_TRADING     = _cfg.get("live_trading", False)
 
 SIGMA_F = 2.0
 SIGMA_C = 1.2
@@ -47,6 +54,7 @@ SIGMA_C = 1.2
 DATA_DIR         = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 STATE_FILE       = DATA_DIR / "state.json"
+LIVE_LOG         = DATA_DIR / "live_trades.log"
 MARKETS_DIR      = DATA_DIR / "markets"
 MARKETS_DIR.mkdir(exist_ok=True)
 CALIBRATION_FILE = DATA_DIR / "calibration.json"
@@ -91,6 +99,19 @@ MONTHS = ["january","february","march","april","may","june",
           "july","august","september","october","november","december"]
 
 # =============================================================================
+# LIVE TRADE LOG
+# =============================================================================
+
+def log_live(action, city, date, detail, order_id=None, error=None):
+    ts  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    err = f" | ERROR: {error}" if error else ""
+    oid = f" | order={order_id}" if order_id else ""
+    line = f"[{ts}] {action:<10} {city:<16} {date} | {detail}{oid}{err}\n"
+    with open(LIVE_LOG, "a", encoding="utf-8") as f:
+        f.write(line)
+    print(f"  [LOG] {line.strip()}")
+
+# =============================================================================
 # MATH
 # =============================================================================
 
@@ -125,6 +146,9 @@ def bet_size(kelly, balance):
 # =============================================================================
 
 _cal: dict = {}
+_trader    = None
+place_buy  = None
+place_sell = None
 
 def load_cal():
     if CALIBRATION_FILE.exists():
@@ -499,15 +523,21 @@ def scan_and_update():
                     ask = float(prices[1]) if len(prices) > 1 else bid
                 except Exception:
                     continue
+                try:
+                    clob_ids     = json.loads(market.get("clobTokenIds", "[]"))
+                    yes_token_id = str(clob_ids[0]) if clob_ids else None
+                except Exception:
+                    yes_token_id = None
                 outcomes.append({
-                    "question":  question,
-                    "market_id": mid,
-                    "range":     rng,
-                    "bid":       round(bid, 4),
-                    "ask":       round(ask, 4),
-                    "price":     round(bid, 4),   # for compatibility
-                    "spread":    round(ask - bid, 4),
-                    "volume":    round(volume, 0),
+                    "question":     question,
+                    "market_id":    mid,
+                    "range":        rng,
+                    "bid":          round(bid, 4),
+                    "ask":          round(ask, 4),
+                    "price":        round(bid, 4),
+                    "spread":       round(ask - bid, 4),
+                    "volume":       round(volume, 0),
+                    "yes_token_id": yes_token_id,
                 })
 
             outcomes.sort(key=lambda x: x["range"][0])
@@ -570,6 +600,15 @@ def scan_and_update():
                         closed += 1
                         reason = "STOP" if current_price < entry else "TRAILING BE"
                         print(f"  [{reason}] {loc['name']} {date} | entry ${entry:.3f} exit ${current_price:.3f} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
+                        if _trader and place_sell and pos.get("yes_token_id"):
+                            try:
+                                resp = place_sell(_trader, pos["yes_token_id"], current_price, pos["shares"])
+                                oid = resp.get("orderID") if isinstance(resp, dict) else None
+                                log_live(reason, loc["name"], date,
+                                         f"exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
+                            except Exception as e:
+                                log_live(f"{reason}_FAIL", loc["name"], date,
+                                         f"exit ${current_price:.3f}", error=e)
 
             # --- CLOSE POSITION if forecast shifted 2+ degrees ---
             if mkt.get("position") and forecast_temp is not None:
@@ -597,6 +636,16 @@ def scan_and_update():
                         mkt["position"]["status"]       = "closed"
                         closed += 1
                         print(f"  [CLOSE] {loc['name']} {date} — forecast changed | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
+                        if _trader and place_sell and mkt["position"].get("yes_token_id"):
+                            try:
+                                resp = place_sell(_trader, mkt["position"]["yes_token_id"],
+                                                  current_price, mkt["position"]["shares"])
+                                oid = resp.get("orderID") if isinstance(resp, dict) else None
+                                log_live("CLOSE", loc["name"], date,
+                                         f"forecast changed exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
+                            except Exception as e:
+                                log_live("CLOSE_FAIL", loc["name"], date,
+                                         f"exit ${current_price:.3f}", error=e)
 
             # --- OPEN POSITION ---
             if not mkt.get("position") and forecast_temp is not None and hours >= MIN_HOURS:
@@ -650,6 +699,8 @@ def scan_and_update():
                                     "exit_price":   None,
                                     "close_reason": None,
                                     "closed_at":    None,
+                                    "yes_token_id": o.get("yes_token_id"),
+                                    "order_id":     None,
                                 }
 
                 if best_signal:
@@ -683,6 +734,18 @@ def scan_and_update():
                         print(f"  [BUY]  {loc['name']} {horizon} {date} | {bucket_label} | "
                               f"${best_signal['entry_price']:.3f} | EV {best_signal['ev']:+.2f} | "
                               f"${best_signal['cost']:.2f} ({best_signal['forecast_src'].upper()})")
+                        if _trader and place_buy and best_signal.get("yes_token_id"):
+                            try:
+                                resp = place_buy(_trader, best_signal["yes_token_id"],
+                                                 best_signal["entry_price"], best_signal["cost"])
+                                oid = resp.get("orderID") if isinstance(resp, dict) else None
+                                mkt["position"]["order_id"] = oid
+                                log_live("BUY", loc["name"], date,
+                                         f"${best_signal['entry_price']:.3f} x {best_signal['shares']} shares = ${best_signal['cost']:.2f}",
+                                         order_id=oid)
+                            except Exception as e:
+                                log_live("BUY_FAIL", loc["name"], date,
+                                         f"${best_signal['entry_price']:.3f} x ${best_signal['cost']:.2f}", error=e)
 
             # Market closed by time
             if hours < 0.5 and mkt["status"] == "open":
@@ -940,6 +1003,15 @@ def monitor_positions():
             pos["status"]       = "closed"
             closed += 1
             print(f"  [{reason}] {city_name} {mkt['date']} | entry ${entry:.3f} exit ${current_price:.3f} | {hours_left:.0f}h left | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
+            if _trader and place_sell and pos.get("yes_token_id"):
+                try:
+                    resp = place_sell(_trader, pos["yes_token_id"], current_price, pos["shares"])
+                    oid = resp.get("orderID") if isinstance(resp, dict) else None
+                    log_live(reason, city_name, mkt["date"],
+                             f"exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
+                except Exception as e:
+                    log_live(f"{reason}_FAIL", city_name, mkt["date"],
+                             f"exit ${current_price:.3f}", error=e)
             save_market(mkt)
 
     if closed:
@@ -950,8 +1022,17 @@ def monitor_positions():
 
 
 def run_loop():
-    global _cal
+    global _cal, _trader, place_buy, place_sell
     _cal = load_cal()
+    if LIVE_TRADING:
+        try:
+            from trader import get_client, place_buy as _pb, place_sell as _ps
+            place_buy  = _pb
+            place_sell = _ps
+            _trader    = get_client(_cfg)
+            print("  [LIVE] Polymarket CLOB connected — REAL TRADES ENABLED")
+        except Exception as e:
+            print(f"  [LIVE ERROR] Cannot connect to CLOB: {e}")
 
     print(f"\n{'='*55}")
     print(f"  WEATHERBET — STARTING")
