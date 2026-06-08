@@ -26,7 +26,7 @@ def main():
     # signature_type=2 = POLY_PROXY: EOA signs on behalf of proxy wallet
     client = ClobClient(HOST, key=pk, chain_id=POLYGON,
                         signature_type=2, funder=proxy)
-    creds = client.create_api_key(nonce=0)
+    creds = client.create_or_derive_api_creds()
     secrets = json.loads(secrets_path.read_text(encoding="utf-8"))
     secrets["clob_api_key"]        = creds.api_key
     secrets["clob_api_secret"]     = creds.api_secret
