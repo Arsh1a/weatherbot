@@ -1,6 +1,5 @@
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType
-from py_clob_client.constants import POLYGON
+from py_clob_client_v2 import ClobClient, SignatureTypeV2, ApiCreds, OrderArgs, OrderType
+from py_clob_client_v2.constants import POLYGON
 
 HOST = "https://clob.polymarket.com"
 
@@ -11,9 +10,8 @@ def get_client(cfg):
         api_secret=cfg["clob_api_secret"],
         api_passphrase=cfg["clob_api_passphrase"],
     )
-    # signature_type=1 = POLY_PROXY (MetaMask users on Polymarket)
     return ClobClient(HOST, key=cfg["private_key"], chain_id=POLYGON, creds=creds,
-                      signature_type=1, funder=cfg["proxy_wallet"])
+                      signature_type=SignatureTypeV2.POLY_1271, funder=cfg["proxy_wallet"])
 
 
 def place_buy(client, token_id, price, usdc_size):

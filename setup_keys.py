@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
-from py_clob_client.client import ClobClient
-from py_clob_client.constants import POLYGON
+from py_clob_client_v2 import ClobClient, SignatureTypeV2
+from py_clob_client_v2.constants import POLYGON
 
 HOST = "https://clob.polymarket.com"
 
@@ -22,12 +22,10 @@ def main():
         return
     print(f"EOA:          {secrets['wallet_address']}")
     print(f"Proxy wallet: {proxy}")
-    print("Connecting to Polymarket CLOB...")
-    # signature_type=2 = POLY_PROXY: EOA signs on behalf of proxy wallet
-    # signature_type=1 = POLY_PROXY (MetaMask users on Polymarket)
+    print("Connecting to Polymarket CLOB (POLY_1271)...")
     client = ClobClient(HOST, key=pk, chain_id=POLYGON,
-                        signature_type=1, funder=proxy)
-    creds = client.create_or_derive_api_creds()
+                        signature_type=SignatureTypeV2.POLY_1271, funder=proxy)
+    creds = client.create_or_derive_api_key()
     secrets = json.loads(secrets_path.read_text(encoding="utf-8"))
     secrets["clob_api_key"]        = creds.api_key
     secrets["clob_api_secret"]     = creds.api_secret
