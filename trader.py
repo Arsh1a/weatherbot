@@ -11,8 +11,9 @@ def get_client(cfg):
         api_secret=cfg["clob_api_secret"],
         api_passphrase=cfg["clob_api_passphrase"],
     )
+    # signature_type=1 = POLY_PROXY (MetaMask users on Polymarket)
     return ClobClient(HOST, key=cfg["private_key"], chain_id=POLYGON, creds=creds,
-                      signature_type=2, funder=cfg["proxy_wallet"])
+                      signature_type=1, funder=cfg["proxy_wallet"])
 
 
 def place_buy(client, token_id, price, usdc_size):

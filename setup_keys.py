@@ -24,8 +24,9 @@ def main():
     print(f"Proxy wallet: {proxy}")
     print("Connecting to Polymarket CLOB...")
     # signature_type=2 = POLY_PROXY: EOA signs on behalf of proxy wallet
+    # signature_type=1 = POLY_PROXY (MetaMask users on Polymarket)
     client = ClobClient(HOST, key=pk, chain_id=POLYGON,
-                        signature_type=2, funder=proxy)
+                        signature_type=1, funder=proxy)
     creds = client.create_or_derive_api_creds()
     secrets = json.loads(secrets_path.read_text(encoding="utf-8"))
     secrets["clob_api_key"]        = creds.api_key
