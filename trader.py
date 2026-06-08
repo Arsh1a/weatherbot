@@ -12,7 +12,7 @@ def get_client(cfg):
         api_passphrase=cfg["clob_api_passphrase"],
     )
     return ClobClient(HOST, key=cfg["private_key"], chain_id=POLYGON, creds=creds,
-                      signature_type=1, funder=cfg["wallet_address"])
+                      signature_type=2, funder=cfg["wallet_address"])
 
 
 def place_buy(client, token_id, price, usdc_size):
