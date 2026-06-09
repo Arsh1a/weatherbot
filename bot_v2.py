@@ -734,7 +734,7 @@ def scan_and_update():
                         mkt["position"]["status"]       = "closed"
                         closed += 1
                         print(f"  [CLOSE] {loc['name']} {date} — forecast changed | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
-                        if _trader and place_sell and mkt["position"].get("yes_token_id"):
+                        if _trader and place_sell and mkt["position"].get("yes_token_id") and current_price >= 0.01:
                             if DRY_RUN:
                                 log_live("DRY_CLOSE", loc["name"], date,
                                          f"WOULD sell ${current_price:.3f} x {mkt['position']['shares']} shares pnl={'+'if pnl>=0 else ''}{pnl:.2f}")
@@ -871,7 +871,8 @@ def scan_and_update():
                                              order_id=oid)
                                     if oid:
                                         try:
-                                            _trader.cancel(oid)
+                                            from py_clob_client_v2 import OrderPayload
+                                            _trader.cancel_order(OrderPayload(orderID=oid))
                                         except Exception:
                                             pass
                             except Exception as e:
