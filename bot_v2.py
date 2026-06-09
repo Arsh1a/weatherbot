@@ -1096,6 +1096,22 @@ def run_loop():
             place_sell = _ps
             _trader    = get_client(_cfg)
             print("  [LIVE] Polymarket CLOB connected — REAL TRADES ENABLED")
+            # Sync internal balance to actual USDC on startup
+            try:
+                from py_clob_client_v2 import AssetType, BalanceAllowanceParams
+                bal_info = _trader.get_balance_allowance(
+                    BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+                )
+                actual_usdc = int(bal_info["balance"]) / 1e6
+                state = load_state()
+                if abs(state["balance"] - actual_usdc) > 0.50:
+                    print(f"  [SYNC] Balance corrected: ${state['balance']} -> ${actual_usdc:.2f}")
+                    state["balance"] = round(actual_usdc, 2)
+                    save_state(state)
+                else:
+                    print(f"  [SYNC] Balance OK: ${actual_usdc:.2f}")
+            except Exception as e:
+                print(f"  [SYNC] Could not fetch USDC balance: {e}")
         except Exception as e:
             print(f"  [LIVE ERROR] Cannot connect to CLOB: {e}")
 
