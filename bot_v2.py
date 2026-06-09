@@ -1230,6 +1230,62 @@ def run_loop():
                     print(f"  [SYNC] Balance after purge: ${actual_usdc:.2f}")
             except Exception as e:
                 print(f"  [PURGE] Could not verify token balances: {e}")
+            # Reconcile on-chain positions vs tracked state
+            try:
+                r = requests.get(
+                    f"https://data-api.polymarket.com/positions?user={_cfg.get('proxy_wallet', '')}&sizeThreshold=0.5",
+                    timeout=10
+                )
+                onchain = r.json() if r.status_code == 200 else []
+                tracked_tokens = set()
+                for mkt in load_all_markets():
+                    pos = mkt.get("position") or {}
+                    if pos.get("status") == "open" and pos.get("yes_token_id"):
+                        tracked_tokens.add(pos["yes_token_id"])
+                for p in onchain:
+                    token_id = p.get("asset") or p.get("tokenId") or p.get("token_id") or ""
+                    size     = float(p.get("size", 0) or p.get("currentTokens", 0) or 0)
+                    title    = p.get("title") or p.get("market") or ""
+                    if token_id and token_id not in tracked_tokens and size >= 0.5:
+                        # Only auto-add weather markets; flag others
+                        if any(kw in title.lower() for kw in ("temperature", "highest temp", "°c", "°f")):
+                            print(f"  [RECON] Untracked weather position: {title[:60]} ({size:.2f} shares) — adding")
+                            # Find or create a market file for this position
+                            date_m = re.search(r'june (\d+)', title, re.IGNORECASE)
+                            city_m = re.search(r'in ([A-Za-z ]+?) (be|between)', title, re.IGNORECASE)
+                            date_str  = f"2026-06-{int(date_m.group(1)):02d}" if date_m else "2026-06-00"
+                            city_name = city_m.group(1).strip() if city_m else "Unknown"
+                            city_slug = city_name.lower().replace(" ", "-")
+                            fp = MARKETS_DIR / f"{city_slug}_{date_str}.json"
+                            if fp.exists():
+                                mkt = json.loads(fp.read_text())
+                            else:
+                                mkt = {"city_name": city_name, "city": city_slug,
+                                       "date": date_str, "status": "open",
+                                       "all_outcomes": [], "pnl": None}
+                            if not (mkt.get("position") or {}).get("status") == "open":
+                                curr_price = float(p.get("curPrice") or p.get("price") or 0.44)
+                                mkt["position"] = {
+                                    "question":     title,
+                                    "entry_price":  curr_price,
+                                    "bid_at_entry": curr_price,
+                                    "shares":       round(size, 6),
+                                    "cost":         round(size * curr_price, 4),
+                                    "yes_token_id": token_id,
+                                    "order_id":     None,
+                                    "opened_at":    datetime.now(timezone.utc).isoformat(),
+                                    "status":       "open",
+                                    "pnl":          None,
+                                    "exit_price":   None,
+                                    "close_reason": None,
+                                    "closed_at":    None,
+                                    "forecast_src": "recon",
+                                }
+                                fp.write_text(json.dumps(mkt, indent=2))
+                        else:
+                            print(f"  [RECON] Non-weather untracked position: {title[:60]} ({size:.2f} shares) — skipping")
+            except Exception as e:
+                print(f"  [RECON] Reconciliation error: {e}")
         except Exception as e:
             print(f"  [LIVE ERROR] Cannot connect to CLOB: {e}")
 
