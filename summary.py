@@ -108,28 +108,41 @@ for m in sorted(open_pos, key=lambda x: x.get("event_end_date", x["date"])):
 
 print(f"  {'TOTAL':<22} {'':>6} {'':>6} {'':>6} ${total_cost:>4.2f} ${total_mkt_value:>7.2f} ${total_win_payout:>6.2f}  $0.00")
 
-# CLOSED (stopped/forecast-changed — partial exits)
-if closed:
-    print(f"\n{'─'*W}")
-    print(f"  CLOSED EARLY ({len(closed)})")
-    print(f"{'─'*W}")
-    for m in sorted(closed, key=lambda x: x["date"]):
-        pos    = m["position"]
-        pnl    = pos.get("pnl", 0) or 0
-        reason = pos.get("close_reason", "?")
-        print(f"  {m['city_name']:<16} {m['date']}  {reason:<18}  PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
+# DAILY P&L
+all_closed = closed + resolved
+if all_closed:
+    from collections import defaultdict
+    daily = defaultdict(lambda: {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "items": []})
 
-# RESOLVED
-if resolved:
+    for m in all_closed:
+        pos    = m.get("position", {}) or {}
+        date   = m["date"]
+        pnl    = (m.get("pnl") or pos.get("pnl") or 0)
+        outcome = m.get("resolved_outcome", pos.get("close_reason", "?"))
+        daily[date]["pnl"]    += pnl
+        daily[date]["trades"] += 1
+        if pnl > 0:
+            daily[date]["wins"] += 1
+        elif pnl < 0:
+            daily[date]["losses"] += 1
+        daily[date]["items"].append((m["city_name"], outcome, pnl))
+
     print(f"\n{'─'*W}")
-    print(f"  RESOLVED MARKETS ({len(resolved)})")
+    print(f"  DAILY P&L")
     print(f"{'─'*W}")
-    for m in sorted(resolved, key=lambda x: x["date"]):
-        outcome = m["resolved_outcome"].upper()
-        pnl     = m.get("pnl", 0) or 0
-        print(f"  {m['city_name']:<16} {m['date']}  {outcome:<6}  PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
-    resolved_pnl = sum(m.get("pnl", 0) or 0 for m in resolved)
-    print(f"  {'Resolved PnL:':<36} {'+'if resolved_pnl>=0 else ''}{resolved_pnl:.2f}")
+    print(f"  {'Date':<12} {'Trades':>6} {'W/L':>5} {'Day P&L':>9}  Positions")
+    print(f"  {'-'*12} {'-'*6} {'-'*5} {'-'*9}  {'-'*20}")
+    running = 0.0
+    for date in sorted(daily.keys()):
+        d       = daily[date]
+        pnl     = d["pnl"]
+        running += pnl
+        wl      = f"{d['wins']}W/{d['losses']}L"
+        cities  = ", ".join(f"{city}({'+'if p>=0 else ''}{p:.2f})" for city, _, p in d["items"])
+        sign    = "+" if pnl >= 0 else ""
+        print(f"  {date:<12} {d['trades']:>6} {wl:>5} {sign}{pnl:>8.2f}  {cities}")
+    sign = "+" if running >= 0 else ""
+    print(f"  {'TOTAL':<12} {sum(d['trades'] for d in daily.values()):>6} {'':>5} {sign}{running:>8.2f}")
 
 # BOTTOM LINE
 print(f"\n{'═'*W}")
