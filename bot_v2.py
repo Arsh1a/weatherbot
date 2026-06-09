@@ -114,15 +114,93 @@ def log_live(action, city, date, detail, order_id=None, error=None):
         f.write(line)
     print(f"  [LOG] {line.strip()}")
 
-def send_telegram(msg):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+def send_telegram(msg, chat_id=None):
+    if not TELEGRAM_TOKEN:
+        return
+    cid = chat_id or TELEGRAM_CHAT_ID
+    if not cid:
         return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"},
+            json={"chat_id": cid, "text": msg, "parse_mode": "HTML"},
             timeout=5,
         )
+    except Exception:
+        pass
+
+_tg_offset = 0
+
+def build_tg_summary():
+    try:
+        from py_clob_client_v2 import AssetType, BalanceAllowanceParams
+        actual_usdc = int(_trader.get_balance_allowance(
+            BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+        )["balance"]) / 1e6
+    except Exception:
+        actual_usdc = load_state()["balance"]
+
+    markets  = load_all_markets()
+    open_pos = [m for m in markets if m.get("position") and m["position"].get("status") == "open"]
+    now      = datetime.now(timezone.utc)
+
+    cash_pnl = actual_usdc - 100.0
+    lines = [
+        f"<b>📊 WEATHERBET SUMMARY</b>",
+        f"💰 USDC: <b>${actual_usdc:.2f}</b>  ({'+'if cash_pnl>=0 else ''}{cash_pnl:.2f} vs $100 start)",
+    ]
+
+    if open_pos:
+        lines.append(f"\n<b>Open positions ({len(open_pos)}):</b>")
+        total_win_payout = 0.0
+        total_mkt_val    = 0.0
+        for m in sorted(open_pos, key=lambda x: x.get("event_end_date", x["date"])):
+            pos = m["position"]
+            try:
+                r   = requests.get(f"https://gamma-api.polymarket.com/markets/{pos['market_id']}", timeout=3)
+                bid = float(r.json().get("bestBid") or pos["entry_price"])
+            except Exception:
+                bid = pos["entry_price"]
+            win_pay  = round(pos["shares"], 2)
+            mkt_val  = round(bid * pos["shares"], 2)
+            total_win_payout += win_pay
+            total_mkt_val    += mkt_val
+            try:
+                end   = datetime.fromisoformat(m.get("event_end_date", "").replace("Z", "+00:00"))
+                mins  = max(0, int((end - now).total_seconds() / 60))
+                tleft = f"{mins//60}h{mins%60:02d}m" if mins > 0 else "RESOLVING"
+            except Exception:
+                tleft = "?"
+            arrow = "▲" if bid > pos["entry_price"] + 0.01 else ("▼" if bid < pos["entry_price"] - 0.01 else "─")
+            lines.append(f"  {m['city_name']} {m['date'][5:]}  {arrow}${bid:.3f}  ⏰{tleft}  WIN=${win_pay:.2f}")
+
+        lines.append(f"\n<b>Portfolio now:</b>  ${actual_usdc + total_mkt_val:.2f}")
+        lines.append(f"<b>If all WIN:</b>      ${actual_usdc + total_win_payout:.2f}  (+{actual_usdc+total_win_payout-100:.2f})")
+        lines.append(f"<b>If all LOSE:</b>     ${actual_usdc:.2f}  ({cash_pnl:+.2f})")
+    else:
+        lines.append("\nNo open positions.")
+
+    return "\n".join(lines)
+
+def poll_telegram_commands():
+    global _tg_offset
+    if not TELEGRAM_TOKEN:
+        return
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+            params={"offset": _tg_offset, "timeout": 0, "limit": 10},
+            timeout=6,
+        )
+        for update in r.json().get("result", []):
+            _tg_offset = update["update_id"] + 1
+            msg     = update.get("message", {})
+            text    = msg.get("text", "").strip().lower()
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+            if not chat_id:
+                continue
+            if text in ("/summary", "/status", "/s"):
+                send_telegram(build_tg_summary(), chat_id=chat_id)
     except Exception:
         pass
 
@@ -1144,7 +1222,7 @@ def run_loop():
                 time.sleep(60)
                 continue
         else:
-            # Quick stop monitoring
+            # Quick stop monitoring + Telegram command polling
             print(f"[{now_str}] monitoring positions...")
             try:
                 stopped = monitor_positions()
@@ -1153,6 +1231,7 @@ def run_loop():
                     print(f"  balance: ${state['balance']:,.2f}")
             except Exception as e:
                 print(f"  Monitor error: {e}")
+            poll_telegram_commands()
 
         try:
             time.sleep(MONITOR_INTERVAL)
