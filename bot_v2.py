@@ -597,7 +597,7 @@ def scan_and_update():
                 if current_price is not None:
                     current_price = o.get("bid", current_price)  # sell at bid
                     entry = pos["entry_price"]
-                    stop  = pos.get("stop_price", entry * 0.80)  # 20% stop by default
+                    stop  = pos.get("stop_price", entry * 0.50)  # 50% stop by default
 
                     # Trailing: if up 20%+ — move stop to breakeven
                     if current_price >= entry * 1.20 and stop < entry:
@@ -1018,20 +1018,12 @@ def monitor_positions():
             continue
 
         entry = pos["entry_price"]
-        stop  = pos.get("stop_price", entry * 0.80)
+        stop  = pos.get("stop_price", entry * 0.50)
         city_name = LOCATIONS.get(mkt["city"], {}).get("name", mkt["city"])
 
         # Hours left to resolution
         end_date = mkt.get("event_end_date", "")
         hours_left = hours_to_resolution(end_date) if end_date else 999.0
-
-        # Take-profit threshold based on hours to resolution
-        if hours_left < 24:
-            take_profit = None        # hold to resolution
-        elif hours_left < 48:
-            take_profit = 0.85        # 24-48h: take profit at $0.85
-        else:
-            take_profit = 0.75        # 48h+: take profit at $0.75
 
         # Trailing: if up 20%+ — move stop to breakeven
         if current_price >= entry * 1.20 and stop < entry:
@@ -1039,19 +1031,13 @@ def monitor_positions():
             pos["trailing_activated"] = True
             print(f"  [TRAILING] {city_name} {mkt['date']} — stop moved to breakeven ${entry:.3f}")
 
-        # Check take-profit
-        take_triggered = take_profit is not None and current_price >= take_profit
-        # Check stop
         stop_triggered = current_price <= stop
 
-        if take_triggered or stop_triggered:
+        if stop_triggered:
             pnl = round((current_price - entry) * pos["shares"], 2)
             balance += pos["cost"] + pnl
             pos["closed_at"]    = datetime.now(timezone.utc).isoformat()
-            if take_triggered:
-                pos["close_reason"] = "take_profit"
-                reason = "TAKE"
-            elif current_price < entry:
+            if current_price < entry:
                 pos["close_reason"] = "stop_loss"
                 reason = "STOP"
             else:
