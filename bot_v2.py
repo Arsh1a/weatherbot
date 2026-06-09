@@ -746,8 +746,16 @@ def scan_and_update():
                                     log_live("CLOSE", loc["name"], date,
                                              f"forecast changed exit ${current_price:.3f} pnl={'+'if pnl>=0 else ''}{pnl:.2f}", order_id=oid)
                                 except Exception as e:
-                                    log_live("CLOSE_FAIL", loc["name"], date,
-                                             f"exit ${current_price:.3f}", error=e)
+                                    if "balance: 0" in str(e) or "balance is not enough" in str(e):
+                                        # Phantom position — undo the balance change
+                                        balance -= pos["cost"] + pnl
+                                        mkt["position"]["pnl"]          = 0.0
+                                        mkt["position"]["close_reason"] = "never_filled"
+                                        log_live("PHANTOM", loc["name"], date,
+                                                 f"position never filled — reversed phantom accounting")
+                                    else:
+                                        log_live("CLOSE_FAIL", loc["name"], date,
+                                                 f"exit ${current_price:.3f}", error=e)
 
             # --- OPEN POSITION ---
             if not mkt.get("position") and forecast_temp is not None and hours >= MIN_HOURS:
@@ -1180,6 +1188,47 @@ def run_loop():
                     print(f"  [SYNC] Balance OK: ${actual_usdc:.2f}")
             except Exception as e:
                 print(f"  [SYNC] Could not fetch USDC balance: {e}")
+            # Purge phantom positions — any open position with 0 tokens on CLOB
+            try:
+                from py_clob_client_v2 import AssetType, BalanceAllowanceParams
+                purged = 0
+                for mkt in load_all_markets():
+                    pos = mkt.get("position")
+                    if not pos or pos.get("status") != "open":
+                        continue
+                    token_id = pos.get("yes_token_id")
+                    if not token_id:
+                        continue
+                    try:
+                        info = _trader.get_balance_allowance(
+                            BalanceAllowanceParams(asset_type=AssetType.CONDITIONAL, token_id=token_id)
+                        )
+                        token_bal = int(info.get("balance", "0")) / 1e6
+                    except Exception:
+                        continue
+                    if token_bal < 0.01:
+                        pos["status"]       = "closed"
+                        pos["close_reason"] = "never_filled"
+                        pos["pnl"]          = 0.0
+                        mkt["status"]       = "resolved"
+                        mkt["resolved_outcome"] = "no_position"
+                        mkt["pnl"]          = 0.0
+                        save_market(mkt)
+                        purged += 1
+                        print(f"  [PURGE] {mkt['city_name']} {mkt['date']} — no tokens on CLOB, marked phantom")
+                if purged:
+                    print(f"  [PURGE] Removed {purged} phantom position(s)")
+                    # Re-sync balance after purge
+                    bal_info = _trader.get_balance_allowance(
+                        BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+                    )
+                    actual_usdc = int(bal_info["balance"]) / 1e6
+                    state = load_state()
+                    state["balance"] = round(actual_usdc, 2)
+                    save_state(state)
+                    print(f"  [SYNC] Balance after purge: ${actual_usdc:.2f}")
+            except Exception as e:
+                print(f"  [PURGE] Could not verify token balances: {e}")
         except Exception as e:
             print(f"  [LIVE ERROR] Cannot connect to CLOB: {e}")
 
