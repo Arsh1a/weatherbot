@@ -616,7 +616,7 @@ def scan_and_update():
                         closed += 1
                         reason = "STOP" if current_price < entry else "TRAILING BE"
                         print(f"  [{reason}] {loc['name']} {date} | entry ${entry:.3f} exit ${current_price:.3f} | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
-                        if _trader and place_sell and pos.get("yes_token_id"):
+                        if _trader and place_sell and pos.get("yes_token_id") and current_price >= 0.01:
                             if DRY_RUN:
                                 log_live(f"DRY_{reason}", loc["name"], date,
                                          f"WOULD sell ${current_price:.3f} x {pos['shares']} shares pnl={'+'if pnl>=0 else ''}{pnl:.2f}")
@@ -1031,13 +1031,17 @@ def monitor_positions():
             pos["trailing_activated"] = True
             print(f"  [TRAILING] {city_name} {mkt['date']} — stop moved to breakeven ${entry:.3f}")
 
+        take_triggered = current_price >= 0.70
         stop_triggered = current_price <= stop
 
-        if stop_triggered:
+        if take_triggered or stop_triggered:
             pnl = round((current_price - entry) * pos["shares"], 2)
             balance += pos["cost"] + pnl
             pos["closed_at"]    = datetime.now(timezone.utc).isoformat()
-            if current_price < entry:
+            if take_triggered:
+                pos["close_reason"] = "take_profit"
+                reason = "TAKE"
+            elif current_price < entry:
                 pos["close_reason"] = "stop_loss"
                 reason = "STOP"
             else:
@@ -1048,7 +1052,7 @@ def monitor_positions():
             pos["status"]       = "closed"
             closed += 1
             print(f"  [{reason}] {city_name} {mkt['date']} | entry ${entry:.3f} exit ${current_price:.3f} | {hours_left:.0f}h left | PnL: {'+'if pnl>=0 else ''}{pnl:.2f}")
-            if _trader and place_sell and pos.get("yes_token_id"):
+            if _trader and place_sell and pos.get("yes_token_id") and current_price >= 0.01:
                 if DRY_RUN:
                     log_live(f"DRY_{reason}", city_name, mkt["date"],
                              f"WOULD sell ${current_price:.3f} x {pos['shares']} shares pnl={'+'if pnl>=0 else ''}{pnl:.2f}")
