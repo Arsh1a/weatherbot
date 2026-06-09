@@ -59,24 +59,42 @@ total_cost        = 0.0
 total_mkt_value   = 0.0
 total_win_payout  = 0.0
 
+def time_left(end_date_str):
+    if not end_date_str:
+        return "unknown"
+    try:
+        end = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+        diff = end - now
+        total_mins = int(diff.total_seconds() / 60)
+        if total_mins <= 0:
+            return "RESOLVING"
+        if total_mins < 60:
+            return f"{total_mins}m"
+        h = total_mins // 60
+        m = total_mins % 60
+        return f"{h}h {m:02d}m"
+    except Exception:
+        return "?"
+
 print(f"\n{'─'*W}")
 print(f"  OPEN POSITIONS ({len(open_pos)})")
 print(f"{'─'*W}")
-print(f"  {'Market':<22} {'Shares':>6} {'Entry':>6} {'Now':>6} {'Cost':>5} {'Curr Val':>8} {'If WIN':>7} {'If LOSE':>7}")
-print(f"  {'-'*22} {'-'*6} {'-'*6} {'-'*6} {'-'*5} {'-'*8} {'-'*7} {'-'*7}")
+print(f"  {'Market':<20} {'Resolves':>10} {'Entry':>6} {'Now':>6} {'Cost':>5} {'Val':>6} {'WIN':>6} {'LOSE':>5}")
+print(f"  {'-'*20} {'-'*10} {'-'*6} {'-'*6} {'-'*5} {'-'*6} {'-'*6} {'-'*5}")
 
-for m in sorted(open_pos, key=lambda x: x["date"]):
+for m in sorted(open_pos, key=lambda x: x.get("event_end_date", x["date"])):
     pos   = m["position"]
     mid   = pos["market_id"]
     bid, ask = live_bid(mid)
 
-    entry  = pos["entry_price"]
-    shares = pos["shares"]
-    cost   = pos["cost"]
-    curr   = bid if bid else entry
+    entry   = pos["entry_price"]
+    shares  = pos["shares"]
+    cost    = pos["cost"]
+    curr    = bid if bid else entry
     mkt_val = round(curr * shares, 2)
-    win_pay = round(shares * 1.0, 2)   # $1/share at resolution
+    win_pay = round(shares * 1.0, 2)
     lose_pay = 0.0
+    tleft   = time_left(m.get("event_end_date", ""))
 
     total_cost       += cost
     total_mkt_value  += mkt_val
@@ -86,7 +104,7 @@ for m in sorted(open_pos, key=lambda x: x["date"]):
     arrow  = "▲" if change > 0.01 else ("▼" if change < -0.01 else "─")
     label  = f"{m['city_name']} {m['date'][5:]}"
 
-    print(f"  {label:<22} {shares:>6.2f} ${entry:>5.3f} {arrow}${curr:>5.3f} ${cost:>4.2f} ${mkt_val:>7.2f} ${win_pay:>6.2f} ${lose_pay:>6.2f}")
+    print(f"  {label:<20} {tleft:>10} {arrow}${entry:>4.3f} {arrow}${curr:>4.3f} ${cost:>4.2f} ${mkt_val:>5.2f} ${win_pay:>5.2f}  $0.00")
 
 print(f"  {'TOTAL':<22} {'':>6} {'':>6} {'':>6} ${total_cost:>4.2f} ${total_mkt_value:>7.2f} ${total_win_payout:>6.2f}  $0.00")
 
