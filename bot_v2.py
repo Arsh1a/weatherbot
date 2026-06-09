@@ -667,8 +667,9 @@ def scan_and_update():
             if mkt.get("position") and mkt["position"].get("status") == "open":
                 pos = mkt["position"]
                 current_price = None
+                pos_mid = pos.get("market_id")
                 for o in outcomes:
-                    if o["market_id"] == pos["market_id"]:
+                    if pos_mid and o.get("market_id") == pos_mid:
                         current_price = o["price"]
                         break
 
@@ -721,7 +722,7 @@ def scan_and_update():
                 if not in_bucket(forecast_temp, old_bucket_low, old_bucket_high) and forecast_far:
                     current_price = None
                     for o in outcomes:
-                        if o["market_id"] == pos["market_id"]:
+                        if pos.get("market_id") and o.get("market_id") == pos["market_id"]:
                             current_price = o["price"]
                             break
                     if current_price is not None:
@@ -1000,7 +1001,7 @@ def print_status():
             if snaps:
                 # Find our bucket price in all_outcomes
                 for o in m.get("all_outcomes", []):
-                    if o["market_id"] == pos["market_id"]:
+                    if pos.get("market_id") and o.get("market_id") == pos["market_id"]:
                         current_price = o["price"]
                         break
 
@@ -1081,7 +1082,7 @@ def monitor_positions():
 
     for mkt in open_pos:
         pos = mkt["position"]
-        mid = pos["market_id"]
+        mid = pos.get("market_id")
 
         # Fetch real bestBid from Polymarket API — actual sell price
         current_price = None
@@ -1263,7 +1264,8 @@ def run_loop():
                                 mkt = {"city_name": city_name, "city": city_slug,
                                        "date": date_str, "status": "open",
                                        "all_outcomes": [], "pnl": None}
-                            if not (mkt.get("position") or {}).get("status") == "open":
+                            existing_status = (mkt.get("position") or {}).get("status")
+                        if existing_status != "open" and existing_status != "closed":
                                 curr_price = float(p.get("curPrice") or p.get("price") or 0.44)
                                 mkt["position"] = {
                                     "question":     title,
