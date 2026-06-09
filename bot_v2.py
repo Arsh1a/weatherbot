@@ -754,35 +754,55 @@ def scan_and_update():
                         print(f"  [WARN] Could not fetch real ask for {best_signal['market_id']}: {e}")
 
                     if not skip_position and best_signal["entry_price"] < MAX_PRICE:
-                        balance -= best_signal["cost"]
-                        mkt["position"] = best_signal
-                        state["total_trades"] += 1
-                        new_pos += 1
                         bucket_label = f"{best_signal['bucket_low']}-{best_signal['bucket_high']}{unit_sym}"
-                        print(f"  [BUY]  {loc['name']} {horizon} {date} | {bucket_label} | "
-                              f"${best_signal['entry_price']:.3f} | EV {best_signal['ev']:+.2f} | "
-                              f"${best_signal['cost']:.2f} ({best_signal['forecast_src'].upper()})")
-                        if _trader and place_buy and best_signal.get("yes_token_id"):
+                        if _trader and place_buy and best_signal.get("yes_token_id") and not DRY_RUN:
+                            try:
+                                resp = place_buy(_trader, best_signal["yes_token_id"],
+                                                 best_signal["entry_price"], best_signal["cost"])
+                                oid    = resp.get("orderID") if isinstance(resp, dict) else None
+                                filled = float(resp.get("sizeMatched", 0)) if isinstance(resp, dict) else 0
+                                if filled > 0:
+                                    # Deduct only what actually filled
+                                    actual_cost = round(filled * best_signal["entry_price"], 4)
+                                    best_signal["shares"] = round(filled, 6)
+                                    best_signal["cost"]   = actual_cost
+                                    best_signal["order_id"] = oid
+                                    balance -= actual_cost
+                                    mkt["position"] = best_signal
+                                    state["total_trades"] += 1
+                                    new_pos += 1
+                                    print(f"  [BUY]  {loc['name']} {horizon} {date} | {bucket_label} | "
+                                          f"${best_signal['entry_price']:.3f} | EV {best_signal['ev']:+.2f} | "
+                                          f"${actual_cost:.2f} ({best_signal['forecast_src'].upper()})")
+                                    log_live("BUY", loc["name"], date,
+                                             f"${best_signal['entry_price']:.3f} x {filled} shares = ${actual_cost:.2f}",
+                                             order_id=oid)
+                                    send_telegram(f"🟢 <b>BUY</b> {loc['name']} {date}\n${best_signal['entry_price']:.3f} × {filled} shares = ${actual_cost:.2f}")
+                                else:
+                                    # GTC order placed but no immediate fill — cancel it, don't record
+                                    log_live("BUY_NOFILL", loc["name"], date,
+                                             f"order {oid} placed but 0 shares filled — cancelling",
+                                             order_id=oid)
+                                    if oid:
+                                        try:
+                                            _trader.cancel(oid)
+                                        except Exception:
+                                            pass
+                            except Exception as e:
+                                log_live("BUY_FAIL", loc["name"], date,
+                                         f"${best_signal['entry_price']:.3f} x ${best_signal['cost']:.2f}", error=e)
+                        else:
+                            # Dry run or no live client — record immediately
+                            balance -= best_signal["cost"]
+                            mkt["position"] = best_signal
+                            state["total_trades"] += 1
+                            new_pos += 1
+                            print(f"  [BUY]  {loc['name']} {horizon} {date} | {bucket_label} | "
+                                  f"${best_signal['entry_price']:.3f} | EV {best_signal['ev']:+.2f} | "
+                                  f"${best_signal['cost']:.2f} ({best_signal['forecast_src'].upper()})")
                             if DRY_RUN:
                                 log_live("DRY_BUY", loc["name"], date,
-                                         f"WOULD buy ${best_signal['entry_price']:.3f} x {best_signal['shares']} shares = ${best_signal['cost']:.2f} token={best_signal['yes_token_id'][:12]}...")
-                            else:
-                                try:
-                                    resp = place_buy(_trader, best_signal["yes_token_id"],
-                                                     best_signal["entry_price"], best_signal["cost"])
-                                    oid = resp.get("orderID") if isinstance(resp, dict) else None
-                                    mkt["position"]["order_id"] = oid
-                                    # Use actual filled shares if available (avoid STOP_FAIL on partial fills)
-                                    filled = float(resp.get("sizeMatched", 0)) if isinstance(resp, dict) else 0
-                                    if filled > 0:
-                                        mkt["position"]["shares"] = round(filled, 6)
-                                    log_live("BUY", loc["name"], date,
-                                             f"${best_signal['entry_price']:.3f} x {mkt['position']['shares']} shares = ${best_signal['cost']:.2f}",
-                                             order_id=oid)
-                                    send_telegram(f"🟢 <b>BUY</b> {loc['name']} {date}\n${best_signal['entry_price']:.3f} × {mkt['position']['shares']} shares = ${best_signal['cost']:.2f}")
-                                except Exception as e:
-                                    log_live("BUY_FAIL", loc["name"], date,
-                                             f"${best_signal['entry_price']:.3f} x ${best_signal['cost']:.2f}", error=e)
+                                         f"WOULD buy ${best_signal['entry_price']:.3f} x {best_signal['shares']} shares = ${best_signal['cost']:.2f} token={best_signal['yes_token_id'][:12] if best_signal.get('yes_token_id') else 'none'}...")
 
             # Market closed by time
             if hours < 0.5 and mkt["status"] == "open":
